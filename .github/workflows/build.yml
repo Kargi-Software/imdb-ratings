@@ -45,19 +45,16 @@ jobs:
           PY
           ls ratings | wc -l
           ls ratings | head -5
-
-      - name: Push to gh-pages
-        run: |
-          cp -r ratings /tmp/ratings
-          echo "Files in /tmp/ratings:"
-          ls /tmp/ratings | wc -l
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git checkout --orphan gh-pages
-          git rm -rf . 2>/dev/null || true
-          cp -r /tmp/ratings ./ratings
-          echo "Files in ./ratings now:"
-          ls ./ratings | wc -l
-          git add ratings
-          git commit -m "update cache"
-          git push -f origin gh-pages
+          - name: Push to gh-pages
+            run: |
+              cp -r ratings /tmp/ratings
+              git config user.name "github-actions"
+              git config user.email "actions@github.com"
+              git checkout --orphan gh-pages
+              git rm -rf . 2>/dev/null || true
+              mkdir -p ratings
+              cp /tmp/ratings/*.json ratings/
+              ls ratings | wc -l
+              git add ratings
+              git commit -m "fix flat structure"
+              git push -f origin gh-pages
