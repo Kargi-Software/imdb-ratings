@@ -1,0 +1,41 @@
+name: Build IMDB
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          curl -s https://datasets.imdbws.com/title.episode.tsv.gz | gunzip > episode.tsv
+          curl -s https://datasets.imdbws.com/title.ratings.tsv.gz | gunzip > ratings.tsv
+          python3 - << 'PY'
+          import csv
+          ratings={}
+          with open('ratings.tsv') as f:
+            for row in csv.DictReader(f, delimiter='\t'):
+              ratings[row['tconst']]=float(row['averageRating'])
+
+          from collections import defaultdict
+          grouped=defaultdict(list)
+          with open('episode.tsv') as f:
+            for row in csv.DictReader(f, delimiter='\t'):
+              parent=row['parentTconst']
+              t=row['tconst']
+              if t in ratings:
+                grouped[parent].append({'s':int(row['seasonNumber']) if row['seasonNumber']!='\\N' else 0, 'e':int(row['episodeNumber']) if row['episodeNumber']!='\\N' else 0, 'r':ratings[t]})
+
+          import os, json
+          os.makedirs('ratings', exist_ok=True)
+          for pid, eps in grouped.items():
+            if len(eps)>10: # فقط سریال های بالای 10 قسمت
+              eps.sort(key=lambda x:(x['s'],x['e']))
+              open(f'ratings/{pid}.json','w').write(json.dumps(eps))
+          PY
+      - uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir:./ratings
+          destination_dir: ratings
