@@ -1,41 +1,76 @@
 name: Build IMDB
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 4 * * *'
-  workflow_dispatch:
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: |
-          curl -s https://datasets.imdbws.com/title.episode.tsv.gz | gunzip > episode.tsv
-          curl -s https://datasets.imdbws.com/title.ratings.tsv.gz | gunzip > ratings.tsv
-          python3 - << 'PY'
-          import csv
-          ratings={}
-          with open('ratings.tsv') as f:
-            for row in csv.DictReader(f, delimiter='\t'):
-              ratings[row['tconst']]=float(row['averageRating'])
 
+      - name: Download datasets
+        run: |
+          curl -L https://datasets.imdbws.com/title.episode.tsv.gz -o episode.tsv.gz
+          curl -L https://datasets.imdbws.com/title.ratings.tsv.gz -o ratings.tsv.gz
+          gunzip -f episode.tsv.gz
+          gunzip -f ratings.tsv.gz
+          ls -lh
+
+      - name: Build JSON files
+        run: |
+          python3 << 'PY'
+          import csv, os, json
           from collections import defaultdict
-          grouped=defaultdict(list)
-          with open('episode.tsv') as f:
-            for row in csv.DictReader(f, delimiter='\t'):
-              parent=row['parentTconst']
-              t=row['tconst']
-              if t in ratings:
-                grouped[parent].append({'s':int(row['seasonNumber']) if row['seasonNumber']!='\\N' else 0, 'e':int(row['episodeNumber']) if row['episodeNumber']!='\\N' else 0, 'r':ratings[t]})
-
-          import os, json
+          ratings = {}
+          with open('ratings.tsv', encoding='utf-8') as f:
+              reader = csv.DictReader(f, delimiter='\t')
+              for row in reader:
+                  try:
+                      ratings[row['tconst']] = float(row['averageRating'])
+                  except:
+                      pass
+          print(f"Loaded {len(ratings)} ratings")
+          grouped = defaultdict(list)
+          with open('episode.tsv', encoding='utf-8') as f:
+              reader = csv.DictReader(f, delimiter='\t')
+              for row in reader:
+                  if row['tconst'] not in ratings:
+                      continue
+                  if not row['seasonNumber'].isdigit():
+                      continue
+                  if not row['episodeNumber'].isdigit():
+                      continue
+                  pid = row['parentTconst']
+                  grouped[pid].append({
+                      's': int(row['seasonNumber']),
+                      'e': int(row['episodeNumber']),
+                      'r': ratings[row['tconst']]
+                  })
           os.makedirs('ratings', exist_ok=True)
+          saved = 0
           for pid, eps in grouped.items():
-            if len(eps)>10: # فقط سریال های بالای 10 قسمت
-              eps.sort(key=lambda x:(x['s'],x['e']))
-              open(f'ratings/{pid}.json','w').write(json.dumps(eps))
+              if len(eps) >= 5:
+                  eps.sort(key=lambda x: (x['s'], x['e']))
+                  with open(f'ratings/{pid}.json', 'w') as out:
+                      out.write(json.dumps(eps))
+                  saved += 1
+          print(f"Saved {saved} series")
           PY
-      - uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir:./ratings
-          destination_dir: ratings
+
+      - name: Publish to gh-pages
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git checkout --orphan gh-pages
+          git rm -rf. || true
+          mkdir ratings
+          mv /home/runner/work/imdb-cache/imdb-cache/ratings/*.json ratings/ 2>/dev/null || mv ratings/ratings/*.json ratings/ || true
+          ls ratings | head
+          git add ratings
+          git commit -m "update cache" || echo "nothing to commit"
+          git push -f origin gh-pages
