@@ -13,52 +13,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download datasets
+      - name: Download and Build
         run: |
-          curl -L https://datasets.imdbws.com/title.episode.tsv.gz -o ep.gz
-          curl -L https://datasets.imdbws.com/title.ratings.tsv.gz -o rat.gz
-          gunzip -f ep.gz
-          gunzip -f rat.gz
-          mv ep ratings_raw_episode.tsv
-          mv rat ratings_raw_ratings.tsv
-          ls -lh
-
-      - name: Build JSON files
-        run: |
+          curl -L https://datasets.imdbws.com/title.episode.tsv.gz | gunzip > episode.tsv
+          curl -L https://datasets.imdbws.com/title.ratings.tsv.gz | gunzip > ratings.tsv
           python3 << 'PY'
           import csv, os, json
           from collections import defaultdict
           ratings={}
-          with open('ratings_raw_ratings.tsv', encoding='utf-8') as f:
-              for row in csv.DictReader(f, delimiter='\t'):
-                  try:
-                      ratings[row['tconst']]=float(row['averageRating'])
+          with open('ratings.tsv', encoding='utf-8') as f:
+              for r in csv.DictReader(f, delimiter='\t'):
+                  try: ratings[r['tconst']]=float(r['averageRating'])
                   except: pass
+          print(f"ratings count: {len(ratings)}")
           grouped=defaultdict(list)
-          with open('ratings_raw_episode.tsv', encoding='utf-8') as f:
-              for row in csv.DictReader(f, delimiter='\t'):
-                  if row['tconst'] not in ratings: continue
-                  if not row['seasonNumber'].isdigit(): continue
-                  if not row['episodeNumber'].isdigit(): continue
-                  grouped[row['parentTconst']].append({'s':int(row['seasonNumber']),'e':int(row['episodeNumber']),'r':ratings[row['tconst']]})
-          os.makedirs('/tmp/ratings', exist_ok=True)
+          with open('episode.tsv', encoding='utf-8') as f:
+              for r in csv.DictReader(f, delimiter='\t'):
+                  if r['tconst'] not in ratings: continue
+                  if not r['seasonNumber'].isdigit(): continue
+                  if not r['episodeNumber'].isdigit(): continue
+                  grouped[r['parentTconst']].append({'s':int(r['seasonNumber']),'e':int(r['episodeNumber']),'r':ratings[r['tconst']]})
+          os.makedirs('ratings', exist_ok=True)
           c=0
           for pid, eps in grouped.items():
-              if len(eps)>=5:
+              if len(eps) >= 5:
                   eps.sort(key=lambda x:(x['s'],x['e']))
-                  open(f'/tmp/ratings/{pid}.json','w').write(json.dumps(eps))
+                  open(f'ratings/{pid}.json','w').write(json.dumps(eps))
                   c+=1
-          print(f"Saved {c}")
+          print(f"SAVED_SERIES: {c}")
+          print(f"EXAMPLE: {list(grouped.keys())[:3]}")
           PY
+          ls ratings | wc -l
+          ls ratings | head -5
 
-      - name: Publish to gh-pages
+      - name: Push to gh-pages
         run: |
+          cp -r ratings /tmp/ratings
+          echo "Files in /tmp/ratings:"
+          ls /tmp/ratings | wc -l
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git checkout --orphan gh-pages
-          git reset --hard
+          git rm -rf . 2>/dev/null || true
           cp -r /tmp/ratings ./ratings
-          ls ratings | wc -l
+          echo "Files in ./ratings now:"
+          ls ./ratings | wc -l
           git add ratings
-          git commit -m "update"
+          git commit -m "update cache"
           git push -f origin gh-pages
