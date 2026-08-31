@@ -70,8 +70,8 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@bot.com"
           git checkout --orphan gh-pages
-          rm -rf.github episode.tsv ratings.tsv
-          mv out/*./
+          rm -rf .github episode.tsv ratings.tsv
+          mv out/* ./
           ls ratings | wc -l
           ls series | wc -l
           git add ratings series
