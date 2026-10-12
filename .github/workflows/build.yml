@@ -1,0 +1,81 @@
+name: Build IMDB
+on:
+  schedule:
+    - cron: '0 3 * * 1'  
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build all ratings
+        run: |
+          curl -L https://datasets.imdbws.com/title.episode.tsv.gz | gunzip > episode.tsv
+          curl -L https://datasets.imdbws.com/title.ratings.tsv.gz | gunzip > ratings.tsv
+          python3 << 'PY'
+          import csv, os, json
+          from collections import defaultdict
+          ratings = {} # tt -> (rating, votes)
+          with open('ratings.tsv') as f:
+              for r in csv.DictReader(f, delimiter='\t'):
+                  try:
+                      ratings[r['tconst']] = (float(r['averageRating']), int(r['numVotes']))
+                  except: pass
+          print(f"total rated: {len(ratings)}")
+
+          # 1. Build 100 sharded files: ratings/01.json...
+          os.makedirs('out/ratings', exist_ok=True)
+          sharded = defaultdict(dict)
+          for tid, (rate, votes) in ratings.items():
+              shard = tid[2:4] # tt01...
+              sharded[shard][tid] = [rate, votes]
+          for shard, data in sharded.items():
+              open(f'out/ratings/{shard}.json','w').write(json.dumps(data))
+          print(f"built {len(sharded)} rating shards")
+
+          # 2. Build series episodes
+          grouped = defaultdict(list)
+          with open('episode.tsv') as f:
+              for r in csv.DictReader(f, delimiter='\t'):
+                  if r['tconst'] not in ratings: continue
+                  if not r['seasonNumber'].isdigit(): continue
+                  if not r['episodeNumber'].isdigit(): continue
+                  parent = r['parentTconst']
+                  rate, votes = ratings[r['tconst']]
+                  grouped[parent].append({
+                      "id": r['tconst'],
+                      "s": int(r['seasonNumber']),
+                      "e": int(r['episodeNumber']),
+                      "r": rate,
+                      "v": votes
+                  })
+          os.makedirs('out/series', exist_ok=True)
+          c=0
+          for parent, eps in grouped.items():
+              if len(eps) < 3: continue
+              eps.sort(key=lambda x:(x['s'], x['e']))
+              shard = parent[2:4]
+              os.makedirs(f'out/series/{shard}', exist_ok=True)
+              open(f'out/series/{shard}/{parent}.json','w').write(json.dumps(eps))
+              c+=1
+          print(f"series saved: {c}")
+          PY
+          du -sh out/*
+
+      - name: Deploy
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@bot.com"
+          git checkout --orphan gh-pages
+          rm -rf .github episode.tsv ratings.tsv
+          mv out/* ./
+          ls ratings | wc -l
+          ls series | wc -l
+          git add ratings series
+          git commit -m "ratings v2 - 3 types"
+          git push -f origin gh-pages
