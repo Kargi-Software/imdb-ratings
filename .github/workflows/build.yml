@@ -41,23 +41,22 @@ jobs:
           # 2. Build series episodes
           grouped = defaultdict(list)
           with open('episode.tsv') as f:
-              for r in csv.DictReader(f, delimiter='\t'):
-                  if r['tconst'] not in ratings: continue
-                  if not r['seasonNumber'].isdigit(): continue
-                  if not r['episodeNumber'].isdigit(): continue
-                  parent = r['parentTconst']
-                  rate, votes = ratings[r['tconst']]
-                  grouped[parent].append({
-                      "id": r['tconst'],
-                      "s": int(r['seasonNumber']),
-                      "e": int(r['episodeNumber']),
-                      "r": rate,
-                      "v": votes
-                  })
+          for r in csv.DictReader(f, delimiter='\t'):
+              if not r['seasonNumber'].isdigit(): continue
+              if not r['episodeNumber'].isdigit(): continue
+              parent = r['parentTconst']
+              rate, votes = ratings.get(r['tconst'], (None, None))
+              grouped[parent].append({
+                  "id": r['tconst'],
+                  "s": int(r['seasonNumber']),
+                  "e": int(r['episodeNumber']),
+                  "r": rate,
+                  "v": votes
+              })
           os.makedirs('out/series', exist_ok=True)
           c=0
           for parent, eps in grouped.items():
-              if len(eps) < 3: continue
+              if len(eps) < 1: continue
               eps.sort(key=lambda x:(x['s'], x['e']))
               shard = parent[2:4]
               os.makedirs(f'out/series/{shard}', exist_ok=True)
