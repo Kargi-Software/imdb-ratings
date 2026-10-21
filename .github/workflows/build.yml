@@ -20,48 +20,60 @@ jobs:
           python3 << 'PY'
           import csv, os, json
           from collections import defaultdict
-          ratings = {} # tt -> (rating, votes)
+          
+          ratings = {}  # tt -> (rating, votes)
           with open('ratings.tsv') as f:
               for r in csv.DictReader(f, delimiter='\t'):
                   try:
                       ratings[r['tconst']] = (float(r['averageRating']), int(r['numVotes']))
-                  except: pass
+                  except Exception:
+                      pass
+          
           print(f"total rated: {len(ratings)}")
-
+          
           # 1. Build 100 sharded files: ratings/01.json...
           os.makedirs('out/ratings', exist_ok=True)
           sharded = defaultdict(dict)
           for tid, (rate, votes) in ratings.items():
-              shard = tid[2:4] # tt01...
+              shard = tid[2:4]  # tt01...
               sharded[shard][tid] = [rate, votes]
+          
           for shard, data in sharded.items():
-              open(f'out/ratings/{shard}.json','w').write(json.dumps(data))
+              with open(f'out/ratings/{shard}.json', 'w') as f:
+                  f.write(json.dumps(data))
+          
           print(f"built {len(sharded)} rating shards")
-
-          # 2. Build series episodes
+          
+          # 2. Build series episodes (شامل اپیزودهای بدون ریتینگ)
           grouped = defaultdict(list)
           with open('episode.tsv') as f:
-          for r in csv.DictReader(f, delimiter='\t'):
-              if not r['seasonNumber'].isdigit(): continue
-              if not r['episodeNumber'].isdigit(): continue
-              parent = r['parentTconst']
-              rate, votes = ratings.get(r['tconst'], (None, None))
-              grouped[parent].append({
-                  "id": r['tconst'],
-                  "s": int(r['seasonNumber']),
-                  "e": int(r['episodeNumber']),
-                  "r": rate,
-                  "v": votes
-              })
+              for r in csv.DictReader(f, delimiter='\t'):
+                  if not r['seasonNumber'].isdigit():
+                      continue
+                  if not r['episodeNumber'].isdigit():
+                      continue
+                  parent = r['parentTconst']
+                  rate, votes = ratings.get(r['tconst'], (None, None))
+                  grouped[parent].append({
+                      "id": r['tconst'],
+                      "s": int(r['seasonNumber']),
+                      "e": int(r['episodeNumber']),
+                      "r": rate,
+                      "v": votes
+                  })
+          
           os.makedirs('out/series', exist_ok=True)
-          c=0
+          c = 0
           for parent, eps in grouped.items():
-              if len(eps) < 1: continue
-              eps.sort(key=lambda x:(x['s'], x['e']))
+              if len(eps) < 1:
+                  continue
+              eps.sort(key=lambda x: (x['s'], x['e']))
               shard = parent[2:4]
               os.makedirs(f'out/series/{shard}', exist_ok=True)
-              open(f'out/series/{shard}/{parent}.json','w').write(json.dumps(eps))
-              c+=1
+              with open(f'out/series/{shard}/{parent}.json', 'w') as f:
+                  f.write(json.dumps(eps))
+              c += 1
+          
           print(f"series saved: {c}")
           PY
           du -sh out/*
